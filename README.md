@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/33071199/README.md)
 # Discord Separator Bot
 
 يرسل صورة الفاصل بعد كل رسالة مستخدم داخل القناة المحددة.

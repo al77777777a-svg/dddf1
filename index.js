@@ -6,6 +6,7 @@ const {
   SlashCommandBuilder, ActivityType, PermissionFlagsBits, ChannelType
 } = require('discord.js');
 
+
 const token = process.env.DISCORD_TOKEN;
 if (!token) { console.error('Missing DISCORD_TOKEN'); process.exit(1); }
 const id = {
@@ -21,9 +22,7 @@ const brand = {
 const dataDir = process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, '.data');
 fs.mkdirSync(dataDir, { recursive: true });
 const dataFile = path.join(dataDir, 'settings.json');
-const fallbackImage = path.resolve(__dirname, process.env.SEPARATOR_FILE || 'separator.webp');
-const packagedSeparator = path.resolve(__dirname, 'separator-oryn-final.webp');
-const packagedSeparatorVersion = 'oryn-2026-09-27';
+const configuredSeparator = process.env.SEPARATOR_FILE || 'separator.webp'; const separatorCandidates = [path.resolve(__dirname, configuredSeparator), path.resolve(__dirname, '..', configuredSeparator), path.resolve(__dirname, path.basename(configuredSeparator))]; const fallbackImage = separatorCandidates.find(fs.existsSync) || separatorCandidates[0];
 const maxImage = 8 * 1024 * 1024;
 let settings = load();
 let count = { messages: 0, reactions: 0, separators: 0, errors: 0 };
@@ -31,6 +30,7 @@ let separatorCounter = 0;
 const queue = new Map();
 const seen = new Set();
 let lastError = 'none';
+
 
 function defaults() {
   return {
@@ -44,20 +44,12 @@ function defaults() {
     separatorEnabled: true,
     separatorFile: null,
     statusMode: process.env.STATUS_MODE || 'auto',
-    statusText: process.env.STATUS_TEXT || brand.name + ' • /help',
+    statusText: process.env.STATUS_TEXT || brand.name,
     statusUrl: process.env.STATUS_URL || null,
     subscriptionExpiresAt: null
   };
 }
-function load() {
-  let loaded;
-  try { loaded = Object.assign(defaults(), JSON.parse(fs.readFileSync(dataFile, 'utf8'))); } catch { loaded = defaults(); }
-  if (!loaded.separatorVersion) {
-    loaded.separatorFile = packagedSeparator;
-    loaded.separatorVersion = packagedSeparatorVersion;
-  }
-  return loaded;
-}
+function load() { try { return Object.assign(defaults(), JSON.parse(fs.readFileSync(dataFile, 'utf8'))); } catch { return defaults(); } }
 function save() { const tmp = dataFile + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(settings, null, 2), { mode: 0o600 }); fs.renameSync(tmp, dataFile); }
 save();
 if (!settings.subscriptionExpiresAt) { const configured = Date.parse(process.env.SUBSCRIPTION_EXPIRES_AT || ''); settings.subscriptionExpiresAt = Number.isFinite(configured) ? configured : Date.now() + Math.max(1, Number(process.env.SUBSCRIPTION_DAYS || 30)) * 86400000; save(); }
@@ -85,7 +77,7 @@ async function readImage(attachment) {
   const buffer = Buffer.concat(chunks); imageType(buffer); return buffer;
 }
 function separator() {
-  const file = settings.separatorFile && fs.existsSync(settings.separatorFile) ? settings.separatorFile : fallbackImage;
+  const file = process.env.SEPARATOR_FILE ? fallbackImage : (settings.separatorFile && fs.existsSync(settings.separatorFile) ? settings.separatorFile : fallbackImage);
   if (!fs.existsSync(file)) throw new Error('ارفع صورة الفاصل أولًا باستخدام /setimage.');
   return new AttachmentBuilder(file, { name: 'vola-separator' + path.extname(file) });
 }
@@ -121,11 +113,12 @@ const commands = [
   cmd('profile', 'تغيير بايو أو صورة أو بنر البوت', true).addStringOption(o => o.setName('bio').setDescription('حتى 400 حرف').setMaxLength(400)).addAttachmentOption(o => o.setName('avatar').setDescription('صورة البوت')).addAttachmentOption(o => o.setName('banner').setDescription('بنر البوت'))
 ].map(c => c.toJSON());
 
+
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 function status() {
   if (!subscriptionActive()) { client.user.setPresence({ status: 'invisible', activities: [] }); return; }
   const modes = { playing: ActivityType.Playing, watching: ActivityType.Watching, listening: ActivityType.Listening, streaming: ActivityType.Streaming };
-  if (settings.statusMode === 'auto') { client.user.setPresence({ status: 'online', activities: [{ name: brand.name + ' • /help', type: ActivityType.Watching }] }); return; }
+  if (settings.statusMode === 'auto') { client.user.setPresence({ status: 'online', activities: [{ name: brand.name, type: ActivityType.Watching }] }); return; }
   const type = modes[settings.statusMode] || ActivityType.Watching;
   client.user.setPresence({ status: 'online', activities: [{ name: settings.statusText, type: type, ...(type === ActivityType.Streaming ? { url: settings.statusUrl } : {}) }] });
 }
@@ -133,10 +126,9 @@ function help() { const nl = String.fromCharCode(10); return { embeds: [embed('C
 function panel() { const nl = String.fromCharCode(10); return { embeds: [embed('CONTROL PANEL', 'كل إعداد محفوظ لهذه النسخة فقط.').addFields({ name: 'Review', value: '<#' + channel('review') + '>' + nl + (settings.reviewEnabled ? '🟢' : '⏸') + ' ' + settings.reviewEmoji, inline: true }, { name: 'Proofs', value: '<#' + channel('proofs') + '>' + nl + (settings.proofsEnabled ? '🟢' : '⏸') + ' ' + settings.proofsEmoji, inline: true }, { name: 'الفاصل', value: (settings.separatorEnabled ? '🟢 يعمل' : '⏸ متوقف') + ' • كل ' + settings.interval + ' رسالة' }, { name: 'بيع البوت', value: 'نفس الملف لكل عميل، مع DISCORD_TOKEN وGUILD_ID وBRAND_NAME ورومات مختلفة لكل نسخة.' })] }; }
 function stats() { const nl = String.fromCharCode(10); return { embeds: [embed('BOT STATUS', 'الاتصال: ' + client.ws.ping + ' ms' + nl + 'وقت التشغيل: ' + Math.floor(process.uptime() / 60) + ' دقيقة' + nl + 'الذاكرة: ' + Math.round(process.memoryUsage().rss / 1024 / 1024) + ' MB' + nl + nl + 'الرسائل: ' + count.messages + nl + 'الريأكشنات: ' + count.reactions + nl + 'الفواصل: ' + count.separators + nl + 'الأخطاء: ' + count.errors + nl + 'آخر خطأ: ' + lastError)] }; }
 async function diagnose(guild) { const me = await guild.members.fetchMe(); const lines = []; for (const pair of [['Review', 'review'], ['Proofs', 'proofs']]) { const ch = await guild.channels.fetch(channel(pair[1])).catch(() => null); if (!ch) { lines.push('❌ ' + pair[0] + ': الروم غير موجود.'); continue; } const p = ch.permissionsFor(me); const needed = ['ViewChannel', 'ReadMessageHistory', 'AddReactions']; if (pair[1] === 'review' && settings.separatorEnabled) needed.push('SendMessages', 'AttachFiles'); const missing = needed.filter(x => !p || !p.has(PermissionFlagsBits[x])); lines.push(missing.length ? '❌ ' + pair[0] + ': ناقص ' + missing.join(', ') : '✅ ' + pair[0] + ': الصلاحيات جاهزة.'); } lines.push(fs.existsSync(settings.separatorFile || fallbackImage) ? '✅ صورة الفاصل موجودة.' : '❌ استخدم /setimage.'); lines.push(process.env.RAILWAY_VOLUME_MOUNT_PATH || process.env.DATA_DIR ? '✅ التخزين الدائم مفعّل.' : '⚠️ أضف DATA_DIR=/data في Railway.'); return { embeds: [embed('DIAGNOSE', lines.join(String.fromCharCode(10)))] }; }
-async function reply(i, body) { return i.deferred || i.replied ? i.editReply(body) : i.reply(body); }
 async function autoSetup(guild) {
-  const canManage = guild.members.me && guild.members.me.permissions.has(PermissionFlagsBits.ManageChannels);
-  if (!canManage) throw new Error('أعطِ البوت صلاحية Manage Channels ثم أعد /setup.');
+  const me = await guild.members.fetchMe();
+  if (!me.permissions.has(PermissionFlagsBits.ManageChannels)) throw new Error('أعطِ البوت صلاحية Manage Channels ثم أعد /setup.');
   const findExisting = async (idValue, names) => {
     const current = idValue ? await guild.channels.fetch(idValue).catch(() => null) : null;
     if (current && current.type === ChannelType.GuildText) return current;
@@ -144,7 +136,7 @@ async function autoSetup(guild) {
   };
   const review = await findExisting(settings.reviewChannel, ['review', 'reviews', 'تقييم', 'التقييمات']);
   const proofs = await findExisting(settings.proofsChannel, ['proofs', 'proof', 'إثبات', 'الإثباتات']);
-  const make = (name) => guild.channels.create({ name, type: ChannelType.GuildText, reason: 'Vola Store automatic setup' });
+  const make = name => guild.channels.create({ name, type: ChannelType.GuildText, reason: 'Vola Store automatic setup' });
   const reviewChannel = review || await make('review');
   const proofsChannel = proofs || await make('proofs');
   settings.reviewChannel = reviewChannel.id;
@@ -152,6 +144,7 @@ async function autoSetup(guild) {
   save();
   return { reviewChannel, proofsChannel };
 }
+async function reply(i, body) { return i.deferred || i.replied ? i.editReply(body) : i.reply(body); }
 async function interaction(i) {
   if (!i.isChatInputCommand()) return;
   if (i.commandName === 'renew' && !owner(i)) return i.reply({ content: 'تجديد الاشتراك لمالك البوت فقط.', ephemeral: true });
@@ -164,7 +157,7 @@ async function interaction(i) {
     if (name === 'help') return reply(i, help());
     if (name === 'subscription') return reply(i, { embeds: [embed('SUBSCRIPTION', subscriptionText())] });
     if (name === 'renew') { const days = o.getInteger('days', true); const start = Math.max(Date.now(), Number(settings.subscriptionExpiresAt) || 0); settings.subscriptionExpiresAt = start + days * 86400000; save(); status(); return reply(i, { embeds: [embed('RENEWED', 'تم تجديد الاشتراك ✅' + String.fromCharCode(10) + subscriptionText())] }); }
-    if (name === 'setup') { const result = await autoSetup(i.guild); const nl = String.fromCharCode(10); return reply(i, { embeds: [embed('AUTO SETUP', 'تم تجهيز البوت تلقائيًا ✅' + nl + 'Review: <#' + result.reviewChannel.id + '>' + nl + 'Proofs: <#' + result.proofsChannel.id + '>' + nl + 'الفاصل والراكشنات يعملان الآن.') ] }); }
+    if (name === 'setup') { const result = await autoSetup(i.guild); const nl = String.fromCharCode(10); return reply(i, { embeds: [embed('AUTO SETUP', 'تم تجهيز البوت تلقائيًا ✅' + nl + 'Review: <#' + result.reviewChannel.id + '>' + nl + 'Proofs: <#' + result.proofsChannel.id + '>' + nl + 'الفاصل والراكشنات يعملان الآن.')] }); }
     if (name === 'panel') return reply(i, panel());
     if (name === 'stats') return reply(i, stats());
     if (name === 'diagnose') return reply(i, await diagnose(i.guild));
@@ -174,23 +167,12 @@ async function interaction(i) {
     if (name === 'setchannel') { const target = o.getString('target', true); settings[target + 'Channel'] = o.getChannel('channel', true).id; save(); return reply(i, { embeds: [embed('SAVED', 'تم تغيير روم ' + target + ' ✅')] }); }
     if (name === 'interval') { settings.interval = o.getInteger('messages', true); save(); separatorCounter = 0; return reply(i, { embeds: [embed('SAVED', 'الفاصل الآن بعد كل ' + settings.interval + ' رسالة ✅')] }); }
     if (name === 'toggle') { const f = o.getString('feature', true); const on = o.getBoolean('enabled', true); settings[f === 'separator' ? 'separatorEnabled' : f + 'Enabled'] = on; save(); return reply(i, panel()); }
-    if (name === 'status') { const mode = o.getString('mode', true); const url = o.getString('url'); if (mode === 'streaming' && (!url || !/^https:\/\/(www\.)?(twitch\.tv|youtube\.com)\/.+/.test(url))) throw new Error('Streaming يحتاج رابط Twitch أو YouTube.'); settings.statusMode = mode; settings.statusText = o.getString('text') || brand.name + ' • /help'; settings.statusUrl = mode === 'streaming' ? url : null; save(); status(); return reply(i, { embeds: [embed('SAVED', 'تم تحديث حالة البوت ✅')] }); }
+    if (name === 'status') { const mode = o.getString('mode', true); const url = o.getString('url'); if (mode === 'streaming' && (!url || !/^https:\/\/(www\.)?(twitch\.tv|youtube\.com)\/.+/.test(url))) throw new Error('Streaming يحتاج رابط Twitch أو YouTube.'); settings.statusMode = mode; settings.statusText = o.getString('text') || brand.name; settings.statusUrl = mode === 'streaming' ? url : null; save(); status(); return reply(i, { embeds: [embed('SAVED', 'تم تحديث حالة البوت ✅')] }); }
     if (name === 'profile') { const bio = o.getString('bio'); const avatar = o.getAttachment('avatar'); const banner = o.getAttachment('banner'); if (!bio && !avatar && !banner) throw new Error('أرسل bio أو avatar أو banner.'); const edit = {}; if (bio) edit.description = bio; if (avatar) edit.icon = await readImage(avatar); if (banner) edit.coverImage = await readImage(banner); await client.application.edit(edit); if (avatar) await client.user.setAvatar(edit.icon); return reply(i, { embeds: [embed('PROFILE SAVED', 'تم تحديث البايو والصورة والبنر ✅')] }); }
   } catch (error) { log(i.commandName, error); return reply(i, { embeds: [embed('NOTICE', error.code === 50013 ? 'البوت ناقص صلاحيات. استخدم /diagnose.' : error.message || 'تعذر تنفيذ الأمر.')] }); }
 }
 client.on('interactionCreate', i => interaction(i).catch(e => log('interaction', e)));
 client.on('messageCreate', async message => { if (!subscriptionActive() || message.author.bot || message.guildId !== id.guild || seen.has(message.id)) return; const target = message.channelId === channel('review') && settings.reviewEnabled ? 'review' : message.channelId === channel('proofs') && settings.proofsEnabled ? 'proofs' : null; if (!target) return; seen.add(message.id); const previous = queue.get(message.channelId) || Promise.resolve(); const current = previous.then(async () => { count.messages++; try { await message.react(target === 'review' ? settings.reviewEmoji : settings.proofsEmoji); count.reactions++; } catch (e) { log('reaction', e); } if (target !== 'review' || !settings.separatorEnabled) return; separatorCounter++; if (separatorCounter < settings.interval) return; separatorCounter = 0; try { await message.channel.send({ files: [separator()] }); count.separators++; } catch (e) { log('separator', e); } }).finally(() => { if (queue.get(message.channelId) === current) queue.delete(message.channelId); }); queue.set(message.channelId, current); });
-async function resolveGuild() {
-  const configured = await client.guilds.fetch(id.guild).catch(() => null);
-  if (configured) return configured;
-  if (client.guilds.cache.size === 1) {
-    const only = client.guilds.cache.first();
-    id.guild = only.id;
-    console.warn('[commands] GUILD_ID not found; using the only connected guild automatically.');
-    return only;
-  }
-  throw new Error('GUILD_ID غير صحيح، والبوت موجود في أكثر من سيرفر.');
-}
-client.once('ready', async () => { console.log(brand.name + ' online; data=' + dataDir); status(); setInterval(status, 60000).unref(); try { await client.application.fetch(); const guild = await resolveGuild(); await guild.commands.set(commands); console.log('Registered ' + commands.length + ' commands in ' + guild.id + '.'); } catch (e) { log('commands', e); } });
+client.once('ready', async () => { console.log(brand.name + ' online; data=' + dataDir); status(); setInterval(status, 60000).unref(); try { await client.application.fetch(); const guild = await client.guilds.fetch(id.guild); await guild.commands.set([]); console.log('Slash commands disabled and cleared in ' + guild.id + '.'); } catch (e) { log('commands', e); } });
 client.on('error', e => log('client', e));
 client.login(token).catch(e => { log('login', e); process.exit(1); });
